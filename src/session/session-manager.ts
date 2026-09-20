@@ -20,6 +20,7 @@ import type { ImQQBotConfig } from '../config.ts';
 import { ModelResolver } from '../model/model-resolver.ts';
 import type { ModelRoute, ModelEntry } from '../model/types.ts';
 import { IdleEvictor } from './idle-evictor.ts';
+import { buildNoReplyInstruction } from '../shared/index.ts';
 import type { QuestionChannel } from '../features/question-channel.ts';
 import type { ApprovalChannel } from '../features/approval-channel.ts';
 import type {
@@ -109,11 +110,15 @@ export class SessionManager {
   }
 
   /**
-   * 通过 system-prompt/assemble waterfall 注入群聊/私聊额外 system prompt。
+   * 通过 system-prompt/assemble waterfall 注入 prompt section。
    *
-   * 该事件在每次 turn 构建 request 时触发；此处按会话 scope（群聊/私聊）
-   * 追加对应的额外 prompt section。会话尚未建立（首次 assemble）或未配置
-   * 额外 prompt 时原样返回，不做改动。
+   * 该事件在每次 turn 构建 request 时触发，此处按会话 scope 追加：
+   *   1. `qqbot:scope-prompt` — 用户配置的群聊/私聊额外 system prompt
+   *   2. `qqbot:no-reply`     — 「发言判断」说明：模型据此输出标识符自决是否发言
+   *      （出站层靠同一个标识符决定要不要真的发消息，见 shared/no-reply.ts）
+   *      按 noReply.scope 决定只注入群聊，还是群聊+私聊都注入
+   *
+   * 会话尚未建立（首次 assemble）时不改动。
    */
   private registerScopePromptInjection(): void {
     const assemble = async (
@@ -127,13 +132,21 @@ export class SessionManager {
       const record = this.findByAgent(context.agent);
       if (!record) return assembled;
 
-      const prompt = record.scope === 'group' ? this.config.groupPrompt : this.config.directPrompt;
-      if (!prompt) return assembled;
+      const sections: PromptSection[] = [...(assembled.sections ?? [])];
+      const before = sections.length;
 
-      return {
-        ...assembled,
-        sections: [...(assembled.sections ?? []), { name: 'qqbot:scope-prompt', order: 90, text: prompt }],
-      };
+      const prompt = record.scope === 'group' ? this.config.groupPrompt : this.config.directPrompt;
+      if (prompt) {
+        sections.push({ name: 'qqbot:scope-prompt', order: 90, text: prompt });
+      }
+
+      const noReply = this.config.noReply;
+      if (noReply.enabled && (noReply.scope === 'all' || record.scope === 'group')) {
+        sections.push({ name: 'qqbot:no-reply', order: 91, text: buildNoReplyInstruction(noReply.marker) });
+      }
+
+      if (sections.length === before) return assembled;
+      return { ...assembled, sections };
     };
 
     (this.ctx as unknown as {

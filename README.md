@@ -131,6 +131,26 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 | `sendFile.restrictPaths` | boolean | `true` | 是否启用路径白名单（仅 media + cwd + extraRoots） |
 | `sendFile.extraRoots` | string[] | `[]` | 额外允许访问的根目录 |
 
+### 模型自决不回复（noReply）
+
+让模型自己决定「这条该不该回」，而不是每条消息都开口。
+
+启用后，系统提示词会多出一段「发言判断」说明，并告知模型一个标识符；
+模型认为无需发言时只输出该标识符，**出站层识别到就一条消息都不发**。
+用的是主模型（掌握完整人设与上下文），不需要额外的判定模型或中间件。
+
+| 配置 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `noReply.enabled` | boolean | `false` | 是否启用 |
+| `noReply.marker` | string | `no-response` | 标识符，会原样写进注入的提示词 |
+| `noReply.scope` | `group`/`all` | `group` | 生效范围：`group` 仅群聊；`all` 群聊与私聊都生效 |
+
+> 模型输出的标识符会被同时容忍 `` `no-response` ``、`**no-response**`、`no-response。` 等包装；
+> 若标识符旁还有正文，只剥掉标识符行，正文照发。
+>
+> **注意**：群聊能否收到「不 @ 机器人」的消息取决于 QQ 开放平台是否开启
+> 「接收所有消息」。未开启时群里只会推送 @ 机器人的事件，本配置对群聊不产生实际效果。
+
 ## 内置命令
 
 | 命令 | 说明 |
@@ -188,6 +208,7 @@ src/
 │   ├── utils.ts                # 通用函数
 │   ├── scope.ts                # scope/peer 提取
 │   └── send-helper.ts          # 分块发送
+│   └── no-reply.ts             # 模型自决不回复协议（解析 + 提示词生成）
 └── commands/                   # 斜杠命令
 ```
 
@@ -209,6 +230,7 @@ sessionKey: `qqbot:${appId}:${scope}:${peerId}`，由 SHA-256 确定性派生 Se
 - **附件发送** — 支持 `qqbot_send_file` 将本地文件发送给用户（默认启用路径白名单）
 - **问答互动** — 支持 `ask_user_question`，单选生成内联按钮（点一个其余变灰）、多选回复编号，逐题推进 + 问题级超时
 - **操作确认** — 支持 `approval/request`，关键操作通过「允许/拒绝」按钮请求用户确认
+- **自决不回复** — 由主模型判断该不该开口，输出标识符即静默，不引入额外判定模型或中间件
 
 ## 本地开发
 

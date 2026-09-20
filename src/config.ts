@@ -47,6 +47,15 @@ export interface SendFileConfig {
   extraRoots: string[];
 }
 
+export interface NoReplyConfig {
+  /** 是否启用：启用后模型可用标识符自决「不回复」，出站层据此丢弃整条消息 */
+  enabled: boolean;
+  /** 标识符（模型用它表示无需回复），会原样写进注入的提示词 */
+  marker: string;
+  /** 生效范围：group = 仅群聊；all = 群聊与私聊都生效 */
+  scope: 'group' | 'all';
+}
+
 export interface ImQQBotConfig {
   /** QQ Bot AppID */
   appId: string;
@@ -92,6 +101,8 @@ export interface ImQQBotConfig {
   vision: VisionConfig;
   /** 附件发送（qqbot_send_file 工具） */
   sendFile: SendFileConfig;
+  /** 模型自决不回复（群聊里输出标识符 → 不发消息） */
+  noReply: NoReplyConfig;
 }
 
 export const ConfigSchema: Schema<ImQQBotConfig> = Schema.object({
@@ -157,4 +168,13 @@ export const ConfigSchema: Schema<ImQQBotConfig> = Schema.object({
     restrictPaths: true,
     extraRoots: [],
   }).description('附件发送工具配置'),
+  noReply: Schema.object({
+    enabled: Schema.boolean().default(false).description('是否启用「模型自决不回复」：模型输出标识符时不发送消息'),
+    marker: Schema.string().default('no-response').description('标识符（模型用它表示无需回复），会写进注入的提示词'),
+    scope: Schema.union(['group', 'all']).default('group').description('生效范围：group=仅群聊；all=群聊与私聊都生效'),
+  }).default({
+    enabled: false,
+    marker: 'no-response',
+    scope: 'group',
+  }).description('模型自决不回复配置'),
 });

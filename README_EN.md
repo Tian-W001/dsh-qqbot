@@ -131,6 +131,30 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 | `sendFile.restrictPaths` | boolean | `true` | Enable path allowlist (media + cwd + extraRoots only) |
 | `sendFile.extraRoots` | string[] | `[]` | Extra allowed root directories |
 
+### Model-decided silence (noReply)
+
+Lets the model decide whether a message deserves a reply instead of answering everything.
+
+When enabled, an extra "reply judgement" section is injected into the system prompt
+together with a marker. When the model judges that it should stay silent, it outputs
+only that marker and the outbound layer **drops the whole message**.
+The main model does the judging (it has the full persona and context), so no extra
+judge model or middleware is involved.
+
+| Config | Type | Default | Description |
+|------|------|--------|------|
+| `noReply.enabled` | boolean | `false` | Enable the feature |
+| `noReply.marker` | string | `no-response` | Marker written verbatim into the injected prompt |
+| `noReply.scope` | `group`/`all` | `group` | `group` = group chats only; `all` = group + private |
+
+> The parser also tolerates wrappers such as `` `no-response` ``, `**no-response**`
+> and `no-response。`; if the marker shares a message with real content, only the
+> marker line is stripped and the rest is still sent.
+>
+> **Note**: whether a group chat delivers non-mention messages at all depends on the
+> "receive all messages" switch in the QQ Open Platform. Without it, only
+> `GROUP_AT_MESSAGE_CREATE` is pushed, so this setting has no visible effect in groups.
+
 ## Built-in Commands
 
 | Command | Description |
@@ -188,6 +212,7 @@ src/
 │   ├── utils.ts                # Common helpers
 │   ├── scope.ts                # scope/peer extraction
 │   └── send-helper.ts          # Chunked send
+│   └── no-reply.ts             # Model-decided silence protocol (parsing + prompt)
 └── commands/                   # Slash commands
 ```
 
@@ -209,6 +234,7 @@ Resolution strategy: in-process reuse → persisted resume → fresh create.
 - **File sending** — supports `qqbot_send_file` to send local files to users (path allowlist enabled by default)
 - **Question interaction** — supports `ask_user_question` with inline keyboard buttons (mutually exclusive) or numbered replies, one question at a time with timeout
 - **Approval confirmation** — supports `approval/request` to ask for user confirmation on critical actions via allow/deny buttons
+- **Model-decided silence** — the main model judges whether to speak; emitting the marker keeps the bot quiet, with no extra judge model or middleware
 
 ## Local Development
 

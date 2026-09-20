@@ -4,3 +4,4 @@ dist/
 .dsh-sessions/
 *.tsbuildinfo
 cordis.dev.yml
+.DS_Store

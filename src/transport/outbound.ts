@@ -8,6 +8,7 @@ import type { SessionManager, SessionRecord } from '../session/index.ts';
 import type { ImQQBotConfig } from '../config.ts';
 import type { Logger } from '../types.ts';
 import { chunkMarkdownText } from './chunker.ts';
+import { resolveNoReply } from '../shared/index.ts';
 import { OutboundBuffer, type QQBotSender } from './outbound-buffer.ts';
 import { formatToolResult, type ToolsRegistryLike, type ToolResultData } from './tool-presenter.ts';
 import {
@@ -111,7 +112,17 @@ class OutboundRouter {
       && !!record.replyTarget.msgId;
   }
 
-  /** 完整 assistant 消息：有流式 buffer 则 flush，否则直接发送文本块 */
+  /**
+   * 完整 assistant 消息：有流式 buffer 则 flush，否则直接发送文本块。
+   *
+   * 「模型自决不回复」的判定只加在**直接发送路径**上。
+   *
+   * 原因：chunk 走的是瞬时事件 `agent/assistant-stream`，而本插件只订阅
+   * `session/event`（持久流，只带 assistant/message）。因此在当前 dsh 下
+   * onChunk 不会被调用、OutboundBuffer 不会被实例化，上面的 buffer 分支不会执行。
+   * 与其为死路径维护第二份解析，不如把判定收敛在唯一生效的路径上。
+   * （若将来 dsh 把 chunk 接回 session/event，需要把判定同步加到 buffer 分支。）
+   */
   private onMessage(sessionId: string, record: SessionRecord, event: MessageEvent): void {
     const buffer = this.buffers.get(sessionId);
     if (buffer !== undefined && buffer.text.trim()) {
@@ -127,8 +138,37 @@ class OutboundRouter {
     const fullText = textParts.join('\n');
     if (!fullText.trim()) return;
 
-    void this.send(record, fullText, 'sendMarkdown');
+    const resolved = this.resolveNoReplyText(record, fullText);
+    if (resolved !== null) {
+      void this.send(record, resolved, 'sendMarkdown');
+    }
     this.buffers.delete(sessionId);
+  }
+
+  /**
+   * 处理「模型自决不回复」标识符（见 shared/no-reply.ts）
+   *
+   * 模型自认为不该发言时会只输出标识符（默认 no-response），
+   * 此处识别后丢弃整条消息；若标识符旁还有正文，则只剥掉标识符行。
+   *
+   * @returns 实际要发送的文本；null 表示应丢弃
+   */
+  private resolveNoReplyText(record: SessionRecord, raw: string): string | null {
+    const cfg = this.config.noReply;
+    if (!cfg.enabled) return raw;
+    // group 范围下私聊不拦截，避免私聊里也「装死」
+    if (cfg.scope !== 'all' && record.replyTarget.scope !== 'group') return raw;
+
+    const outcome = resolveNoReply(raw, cfg.marker);
+    if (!outcome.matched) return raw;
+
+    if (outcome.suppress) {
+      this.logger.info(`im-qqbot: 模型自决不回复（匹配「${cfg.marker}」），已丢弃本条消息`);
+      return null;
+    }
+
+    this.logger.debug('im-qqbot: 已从模型输出中剥离「不回复」标识符，保留其余正文');
+    return outcome.text;
   }
 
   /** 工具调用：仅记录，不发送（避免刷屏，等待结果） */
